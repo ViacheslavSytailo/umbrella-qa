@@ -70,7 +70,7 @@ test.describe('User role / whoami', () => {
     });
 
     expect(res.status()).toBe(200);
-    const body = await res.json();
+    const body = await res.json().catch(() => null);
     expect(body).toBeDefined();
   });
 

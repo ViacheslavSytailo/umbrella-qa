@@ -83,7 +83,7 @@ jobs:
           path: playwright/.auth/
 
       - name: Run tests (shard ${{ matrix.shard }})
-        run: npx playwright test --project=api --project=ui-chromium --shard=${{ matrix.shard }}
+        run: npx playwright test --project=api --project=ui-chromium --shard=${{ matrix.shard }} --no-deps
         env:
           USER_EMAIL: ${{ secrets.USER_EMAIL }}
           USER_PASSWORD: ${{ secrets.USER_PASSWORD }}

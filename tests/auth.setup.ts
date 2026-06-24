@@ -69,10 +69,17 @@ setup('authenticate and store session', async ({ page }) => {
     return { authToken, userId, accountId, divisionId };
   });
 
-  // Fall back to constructing apikey from localStorage if not intercepted
+  // Fall back to building apiKey from JWT sub claim if not intercepted from a real request
+  // (on CI the request listener may miss requests if the page loads from cache)
+  const jwtSub = authData.authToken
+    ? JSON.parse(Buffer.from(authData.authToken.split('.')[1], 'base64').toString()).sub as string
+    : authData.userId;
+
   const apiKey =
     capturedApiKey ||
-    `${authData.userId}:${authData.accountId}:${authData.divisionId}`;
+    (authData.userId && authData.accountId
+      ? `${authData.userId}:${authData.accountId}:${authData.divisionId}`
+      : `${jwtSub}:${authData.accountId || '0'}:${authData.divisionId || '0'}`);
 
   // Save browser storage state for UI tests
   await page.context().storageState({ path: authFile });
