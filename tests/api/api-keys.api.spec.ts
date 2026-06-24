@@ -72,7 +72,7 @@ test.describe('API-key generation flow', () => {
     const [keyUserId, accountId, divisionId] = parts;
     expect(keyUserId.length).toBeGreaterThan(0);
     expect(accountId.length).toBeGreaterThan(0);
-    expect(divisionId).toMatch(/^\d+$/); // numeric division id
+    expect(divisionId).toMatch(/^-?\d+$/); // numeric division id (may be -1 = no division)
   });
 
   // ── 2. Key is bound to the authenticated identity ─────

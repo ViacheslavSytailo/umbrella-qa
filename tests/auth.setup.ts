@@ -26,12 +26,16 @@ setup('authenticate and store session', async ({ page }) => {
     fs.mkdirSync(authDir, { recursive: true });
   }
 
-  // Capture apikey from the first API request — register listener before navigation
+  // Capture apikey from a real API request — register listener before navigation.
+  // The app fires initial requests with placeholder apikey '-1:…:-1' before user
+  // data is resolved, so we skip any key whose components include '-1'.
   let capturedApiKey = '';
   page.on('request', (req) => {
     if (req.url().includes('api.dev.umbrellacost') && !capturedApiKey) {
       const key = req.headers()['apikey'];
-      if (key) capturedApiKey = key;
+      if (key && !key.split(':').includes('-1')) {
+        capturedApiKey = key;
+      }
     }
   });
 
