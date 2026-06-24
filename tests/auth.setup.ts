@@ -50,6 +50,14 @@ setup('authenticate and store session', async ({ page }) => {
 
   // Extract auth token and identity from localStorage
   const authData = await page.evaluate(() => {
+    // Log all localStorage keys for debugging
+    const allKeys: Record<string, string> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i) ?? '';
+      allKeys[k] = localStorage.getItem(k)?.slice(0, 40) ?? '';
+    }
+    console.log('localStorage keys:', JSON.stringify(allKeys));
+
     const authToken =
       localStorage.getItem('authToken') || sessionStorage.getItem('authToken') || '';
     const userId =

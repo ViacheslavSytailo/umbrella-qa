@@ -39,7 +39,7 @@ jobs:
           USER_PASSWORD: ${{ secrets.USER_PASSWORD }}
 
       - name: Verify auth files exist
-        run: ls -la playwright/.auth/ && cat playwright/.auth/token.json | grep -o '"apiKey":"[^"]*"'
+        run: ls -la playwright/.auth/
 
       - name: Upload auth state
         uses: actions/upload-artifact@v4
