@@ -33,7 +33,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
 
       - name: Run auth setup
-        run: npx playwright test --project=auth-setup
+        run: npx playwright test --project=auth-setup --timeout=120000
         env:
           USER_EMAIL: ${{ secrets.USER_EMAIL }}
           USER_PASSWORD: ${{ secrets.USER_PASSWORD }}

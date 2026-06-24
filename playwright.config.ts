@@ -26,7 +26,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'on-first-retry',
     actionTimeout: 15_000,
-    navigationTimeout: 30_000,
+    navigationTimeout: process.env.CI ? 60_000 : 30_000,
   },
   projects: [
     /* ---------- Auth setup ---------- */

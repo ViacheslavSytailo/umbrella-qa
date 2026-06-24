@@ -26,28 +26,29 @@ setup('authenticate and store session', async ({ page }) => {
     fs.mkdirSync(authDir, { recursive: true });
   }
 
-  const loginPage = new LoginPage(page);
-  await loginPage.goto();
-  await loginPage.loginAndWaitForDashboard(testConfig.user.email, testConfig.user.password);
-
-  // Verify we're on the dashboard
-  await expect(page.locator('text=Welcome')).toBeVisible({ timeout: 30_000 });
-
-  // Capture one real API request to extract the exact apikey header value
+  // Capture apikey from the first API request — register listener before navigation
   let capturedApiKey = '';
-  const requestListener = (req: import('@playwright/test').Request) => {
+  page.on('request', (req) => {
     if (req.url().includes('api.dev.umbrellacost') && !capturedApiKey) {
       const key = req.headers()['apikey'];
       if (key) capturedApiKey = key;
     }
-  };
-  page.on('request', requestListener);
+  });
 
-  // Wait for the dashboard to fire API requests
-  await page.waitForTimeout(4_000);
-  page.off('request', requestListener);
+  const loginPage = new LoginPage(page);
+  await loginPage.goto();
+  await loginPage.loginAndWaitForDashboard(testConfig.user.email, testConfig.user.password);
 
-  // Extract auth token from localStorage for API tests
+  // Verify we're on the dashboard — generous timeout for CI
+  await expect(page.locator('text=Welcome')).toBeVisible({ timeout: 60_000 });
+
+  // Wait until at least one API request fires (apikey captured) — max 15s
+  const deadline = Date.now() + 15_000;
+  while (!capturedApiKey && Date.now() < deadline) {
+    await page.waitForTimeout(500);
+  }
+
+  // Extract auth token and identity from localStorage
   const authData = await page.evaluate(() => {
     const authToken =
       localStorage.getItem('authToken') || sessionStorage.getItem('authToken') || '';
@@ -60,15 +61,15 @@ setup('authenticate and store session', async ({ page }) => {
     return { authToken, userId, accountId, divisionId };
   });
 
-  // Build apikey header if not captured from a real request
+  // Fall back to constructing apikey from localStorage if not intercepted
   const apiKey =
     capturedApiKey ||
     `${authData.userId}:${authData.accountId}:${authData.divisionId}`;
 
-  // Save storage state for UI tests
+  // Save browser storage state for UI tests
   await page.context().storageState({ path: authFile });
 
-  // Also save the raw token for API tests
+  // Save raw auth data for API tests
   const tokenFile = path.join(authDir, 'token.json');
   fs.writeFileSync(
     tokenFile,
@@ -86,5 +87,7 @@ setup('authenticate and store session', async ({ page }) => {
     ),
   );
 
-  console.log(`✅ Auth setup complete. Token length: ${authData.authToken.length}, apiKey: ${apiKey}`);
+  console.log(
+    `✅ Auth setup complete. Token length: ${authData.authToken.length}, apiKey: ${apiKey}`,
+  );
 });
