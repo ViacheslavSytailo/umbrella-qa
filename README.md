@@ -23,7 +23,7 @@ cp .env.example .env
 npm test
 ```
 
-**Result:** 38 tests — 1 auth setup + 26 API + 11 UI — all green.
+**Result:** 26 tests — 1 auth setup + 13 API + 12 UI — all green.
 
 ---
 
@@ -41,38 +41,39 @@ umbrella-qa/
 │   │   ├── dashboard.page.ts     # Main dashboard & sidebar navigation
 │   │   └── cost-explorer.page.ts # Cost & Usage Explorer controls
 │   ├── fixtures/
-│   │   └── base.fixture.ts       # Custom fixtures (POM, API client, error collectors)
+│   │   └── base.fixture.ts       # Custom fixtures (page objects + network error collector)
 │   ├── helpers/
-│   │   └── api-client.ts         # Typed API client wrapper with correct auth headers
+│   │   ├── api-client.ts         # Typed API client wrapper with correct auth headers
+│   │   └── read-auth.ts          # Shared helper to read token.json in API specs
 │   └── data/
-│       └── test-data.ts          # Centralized config, routes, endpoints
+│       └── test-data.ts          # Centralized base URLs + credentials
 └── tests/
     ├── auth.setup.ts             # UI login → JWT + apikey extraction → saves storageState
     ├── api/
     │   ├── auth.api.spec.ts      # Authentication: signin-with-token, JWT validation, negative cases
     │   ├── whoami.api.spec.ts    # User identity: roles, preferences, divisions, sub-users
-    │   └── api-keys.api.spec.ts  # API key structure + account access + RBAC negative cases
+    │   └── api-keys.api.spec.ts  # apikey structure + identity binding + auth-boundary negative
     └── ui/
-        └── cost-usage-explorer.ui.spec.ts  # Full Cost & Usage E2E journey (11 tests)
+        └── cost-usage-explorer.ui.spec.ts  # Full Cost & Usage E2E journey (12 tests)
 ```
 
 ---
 
 ## Test Suites
 
-### API Suite (26 tests)
+### API Suite (13 tests)
 
 | File | Coverage |
 |---|---|
-| `auth.api.spec.ts` | signin-with-token, JWT structure/expiry, user roles, sub-users, linked accounts, **negative**: no token, bad token, 404 |
-| `whoami.api.spec.ts` | User identity verification, email match, notification settings, divisions, on-boarding, plain-sub-users |
-| `api-keys.api.spec.ts` | apikey format validation, userId/JWT sub match, account access with apikey, **negative**: no auth, no apikey, admin endpoint, missing fields |
+| `auth.api.spec.ts` | signin-with-token, JWT structure/expiry validation, **negative**: no token, malformed JWT, non-existent endpoint (404) |
+| `whoami.api.spec.ts` | User identity (email + `userKey` binding), roles bound to the authenticated user/account (`userKey`/`accountKey` match the apikey), sub-users list, **negative**: unauthenticated request |
+| `api-keys.api.spec.ts` | apikey format (userId:accountId:divisionId), userId↔JWT `sub` binding, access granted with apikey, **negative**: protected endpoint rejects unauthenticated request |
 
-### UI Suite (11 tests)
+### UI Suite (12 tests)
 
 | File | Coverage |
 |---|---|
-| `cost-usage-explorer.ui.spec.ts` | Dashboard load → sidebar nav → Cost Explorer page, Group By dropdown, Apply button, Total Cost heading, cost metric selector (Amortized), chart with dollar amounts, Latest invoice date, chart SVG, full E2E journey |
+| `cost-usage-explorer.ui.spec.ts` | Dashboard load → sidebar nav → Cost Explorer page, Group By dropdown, Apply button, Total Cost heading, cost metric selector (Amortized), chart with dollar amounts, Latest invoice date, chart SVG, 5xx network error assertion, full E2E journey |
 
 ---
 
@@ -107,15 +108,17 @@ The platform uses **AWS Cognito** for auth with a separate API server at `api.de
 - `Authorization: <Cognito ID token>` — the JWT
 - `apikey: <userId>:<accountId>:<divisionId>` — a routing/identity key
 
-Without `apikey`, requests time out at the gateway (not 401/403). This was discovered by capturing real browser network traffic with Playwright's request interceptor.
+This was found by inspecting the network requests the app makes after login (DevTools, then reproduced with Playwright's request interceptor in `auth.setup.ts`). Without `apikey`, authenticated calls do not succeed.
 
 ### API Test Strategy
 
 API tests use Playwright's `APIRequestContext` (server-side) — no browser, no CORS. Both `Authorization` and `apikey` headers are read from `playwright/.auth/token.json` written by auth setup.
 
-The `ApiClient` helper class encapsulates the correct header set so tests stay clean.
+The `ApiClient` helper class encapsulates the correct header set so tests stay clean. Auth credentials are read once in `beforeAll` via `readAuthData()` (shared across all three spec files) and injected via `client.setAuth()`. Each spec creates its own `APIRequestContext` via `request.newContext()` and disposes it in `afterAll` — the pattern Playwright requires for shared contexts across a `describe` block.
 
-**API key scheme discovery:** The platform has no user-managed CRUD endpoint for API keys (verified by full JS bundle analysis — 213 endpoints — live network capture across all account/settings pages, and direct probing of candidate endpoints like `/users/renewToken`). The platform uses a server-generated composite key `userId:accountId:divisionId` stored in localStorage at sign-in. `api-keys.api.spec.ts` tests this generation flow: key is present after auth, structurally valid, bound to the JWT identity, and grants access to protected resources.
+**On the "API-key generation flow":** The `apikey` the platform sends with every request is a composite value `userId:accountId:divisionId`, assembled at sign-in and stored in `localStorage`. I checked all **Account** tabs (Cloud Accounts / Roles & Users / Linked Accounts / Settings) and the user-avatar menu — there is **no managed "create API key" feature** in the product (Settings → Policies is AWS IAM onboarding JSON, unrelated). So I interpreted "API-key generation flow" as *the key generated for the session at login*. `api-keys.api.spec.ts` verifies that key: present after auth, structurally valid (`userId:accountId:divisionId`), bound to the JWT `sub` claim (identity binding), and grants access to a protected endpoint.
+
+> ⚠️ This is an interpretation. If a managed API-key endpoint does exist (e.g. partner/admin-only, not in this UI), the suite should be extended to cover create → use → revoke.
 
 ### UI Test Strategy
 
@@ -130,27 +133,33 @@ Navigation uses `waitUntil: 'domcontentloaded'` + element-level waits rather tha
 ### Configuration
 
 - Credentials in `.env` (gitignored), `.env.example` as template
-- All URLs and API endpoints centralized in `src/data/test-data.ts`
+- Base URLs and credentials centralized in `src/data/test-data.ts`
 - TypeScript throughout
 
 ---
 
 ## AI Tools Used
 
-- **Kiro (Claude)** — Architecture design, API discovery by capturing browser network traffic, fixing strict-mode violations in selectors, debugging auth header requirements
-- **Antigravity** — Initial browser exploration and page structure discovery (earlier iteration)
+This project was built with heavy AI assistance, used iteratively:
+
+- **Antigravity** — initial browser exploration and page-structure discovery
+- **Kiro (Claude)** — scaffolding the Playwright project, page objects, and first test drafts
+- **Claude Code** — refactoring toward the current structure, removing dead code, fixing the auth/API-context handling, and stabilizing flaky waits
+
+I drove the design decisions and verified behaviour against the live site (see below); the AI tools generated and refactored the code.
 
 ---
 
 ## What Was Verified Manually
 
 1. ✅ Login flow on `https://dev.umbrellacost.dev/login` — two-step: email → Next → password → Sign In
-2. ✅ Dashboard renders with Welcome banner and cost widgets
+2. ✅ Dashboard renders with a Welcome banner and cost widgets
 3. ✅ Sidebar navigation to Cost & Usage Explorer
-4. ✅ Cost Explorer controls: Group By dropdown (Cloud/Custom/K8s tabs), Apply button, Amortized metric selector, date range
-5. ✅ Chart renders with stacked bars and Y-axis dollar amounts
-6. ✅ API requires both `Authorization` (Cognito JWT) and `apikey` (userId:accountId:divisionId) headers
-7. ✅ 36 unique API endpoints discovered from browser traffic analysis
+4. ✅ Cost Explorer renders: Group By control, Apply button, Amortized metric, Total Cost value, chart with Y-axis dollar amounts
+5. ✅ API requires both `Authorization` (Cognito JWT) and `apikey` (`userId:accountId:divisionId`) headers — observed in DevTools and reproduced in `auth.setup.ts`
+6. ✅ Looked for a managed API-key feature — checked all **Account** tabs (Cloud Accounts / Roles & Users / Linked Accounts / Settings → Policies) and the user-avatar menu; none exists. "Settings → Policies" is AWS IAM onboarding JSON, not Umbrella API keys.
+7. ✅ The product has an RBAC model (**Admin / Editor / Viewer** under *Roles & Users*); the test account holds the *Editor* role. The `/users/roles` response was inspected directly and its `userKey`/`accountKey` confirmed to bind to the session apikey — which the roles test now asserts.
+8. ✅ Full suite run against the live site: **13 API + 12 UI (+1 auth-setup) green** (local + CI)
 
 ---
 
@@ -158,8 +167,9 @@ Navigation uses `waitUntil: 'domcontentloaded'` + element-level waits rather tha
 
 1. **Shared test account:** Tests avoid creating/modifying data that could affect other users.
 2. **Token expiry:** Cognito ID tokens expire after ~24h. The auth setup project regenerates them on every run. If running `--no-deps`, ensure `playwright/.auth/token.json` is fresh.
-3. **API key CRUD:** The platform has no user-managed API key CRUD — confirmed by JS bundle analysis (213 endpoints), live network capture, and direct API probing. The `apikey` header is a server-generated composite key (`userId:accountId:divisionId`) assigned at sign-in. The `api-keys.api.spec.ts` suite tests this generation flow.
-4. **Dynamic class names:** The app uses CSS modules. Selectors fall back to `automation-id`, stable `id` attributes, and semantic role/text queries.
+3. **API-key interpretation:** I did not find a user-facing "create API key" flow in the time available, so the API-key suite tests the composite session key (`userId:accountId:divisionId`) rather than a CRUD lifecycle. If a managed API-key feature exists, this is the first thing I'd extend. (See *API Test Strategy*.)
+4. **RBAC:** The product *does* have roles (Admin / Editor / Viewer), but I only have one set of credentials (an *Editor*). A true cross-role test (e.g. Viewer is denied a write) needs a second, lower-privilege login I don't have, so the suite covers the authentication boundary (protected endpoint rejects unauthenticated requests with 401) plus role-identity binding in the roles test. I deliberately removed an earlier "admin endpoint" test that accepted `404` — it passed even though `/admin/accounts` doesn't exist, so it wasn't actually testing authorization.
+5. **Dynamic class names:** The app uses CSS modules. Selectors fall back to `automation-id`, stable `id` attributes, and semantic role/text queries.
 
 ---
 
@@ -167,11 +177,11 @@ Navigation uses `waitUntil: 'domcontentloaded'` + element-level waits rather tha
 
 - ✅ **Allure reporting** — `allure-playwright` reporter configured
 - ✅ **CI workflow** — GitHub Actions with 2-shard matrix + merge-reports job
-- ✅ **Console / network error fixture** — Captures console errors and 4xx/5xx responses
-- ✅ **API-driven UI setup** — JWT and apikey from UI login reused for all API tests
-- ✅ **RBAC negative tests** — Admin endpoint (403/404/405), missing auth (401/403)
-- ✅ **Sharding** — `--shard` flag used in CI matrix
-- ✅ **Teardown** — auth tokens regenerated on each run; no persistent test data created
+- ✅ **Network error fixture** — `networkErrors` collector asserts the Cost Explorer page produces no 5xx responses
+- ✅ **Auth reuse across suites** — one UI login produces both `storageState` (UI) and `token.json` (API), consumed by every spec
+- ✅ **Sharding** — `--shard` flag used in the CI matrix
+- ⚠️ **RBAC negative** — only partially: covers the auth boundary (401), not cross-role authorization (no second account available — see *Known Limitations*)
+- ✅ **Teardown** — auth tokens regenerated on each run; tests create no persistent data
 
 ---
 

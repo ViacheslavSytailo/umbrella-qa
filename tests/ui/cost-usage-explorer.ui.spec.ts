@@ -115,6 +115,20 @@ test.describe('Cost & Usage Explorer Journey', () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
+  test('cost explorer page should produce no server-side errors (5xx)', async ({
+    networkErrors,
+    costExplorerPage,
+  }) => {
+    await costExplorerPage.goto();
+    await costExplorerPage.expectPageVisible();
+
+    const serverErrors = networkErrors.filter((e) => e.status >= 500);
+    expect(
+      serverErrors,
+      `Unexpected server errors: ${JSON.stringify(serverErrors, null, 2)}`,
+    ).toHaveLength(0);
+  });
+
   test('full journey: dashboard → navigate → assert cost data → change period', async ({
     dashboardPage,
     page,

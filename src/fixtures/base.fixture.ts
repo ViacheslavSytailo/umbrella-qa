@@ -1,19 +1,15 @@
-import { test as base, type Page, type BrowserContext } from '@playwright/test';
+import { test as base } from '@playwright/test';
 import { LoginPage, DashboardPage, CostExplorerPage } from '../pages';
-import { ApiClient } from '../helpers/api-client';
 
 /**
  * Extended Playwright fixtures providing:
  * - Pre-constructed page objects
- * - Authenticated API client
- * - Console & network error collectors
+ * - A network error collector (used by the 5xx assertion test)
  */
 type UmbrellaFixtures = {
   loginPage: LoginPage;
   dashboardPage: DashboardPage;
   costExplorerPage: CostExplorerPage;
-  apiClient: ApiClient;
-  consoleErrors: string[];
   networkErrors: { url: string; status: number; statusText: string }[];
 };
 
@@ -30,25 +26,6 @@ export const test = base.extend<UmbrellaFixtures>({
 
   costExplorerPage: async ({ page }, use) => {
     await use(new CostExplorerPage(page));
-  },
-
-  // ── API Client ────────────────────────────────────────
-
-  apiClient: async ({ request }, use) => {
-    const client = new ApiClient(request);
-    await use(client);
-  },
-
-  // ── Console Error Collector ───────────────────────────
-
-  consoleErrors: async ({ page }, use) => {
-    const errors: string[] = [];
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') {
-        errors.push(msg.text());
-      }
-    });
-    await use(errors);
   },
 
   // ── Network Error Collector ───────────────────────────

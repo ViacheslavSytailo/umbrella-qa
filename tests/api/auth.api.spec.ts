@@ -1,35 +1,8 @@
-import { test, expect } from '@playwright/test';
-import fs from 'fs';
-import path from 'path';
+import { test, expect, request as apiRequest } from '@playwright/test';
+import type { APIRequestContext } from '@playwright/test';
 import { testConfig } from '../../src/data/test-data';
-
-const API_BASE = process.env.API_BASE_URL ?? 'https://api.dev.umbrellacost.dev';
-
-interface AuthData {
-  authToken: string;
-  apiKey: string;
-}
-
-function readAuthData(): AuthData {
-  const tokenPath = path.join(__dirname, '../../playwright/.auth/token.json');
-  if (!fs.existsSync(tokenPath)) {
-    throw new Error('Auth token not found. Run auth-setup first.');
-  }
-  const data = JSON.parse(fs.readFileSync(tokenPath, 'utf-8')) as AuthData;
-  return data;
-}
-
-/** Headers required by the Umbrella API gateway on every request. */
-function makeHeaders(authToken: string, apiKey: string): Record<string, string> {
-  return {
-    'Content-Type': 'application/json',
-    accept: 'application/json, text/plain, */*',
-    Authorization: authToken,
-    apikey: apiKey,
-    Referer: 'https://dev.umbrellacost.dev/',
-    commonparams: JSON.stringify({ isPpApplied: false }),
-  };
-}
+import { ApiClient } from '../../src/helpers/api-client';
+import { readAuthData } from '../../src/helpers/read-auth';
 
 /**
  * Authentication API tests.
@@ -42,16 +15,22 @@ function makeHeaders(authToken: string, apiKey: string): Record<string, string> 
 test.describe('Authentication API', () => {
   let authToken: string;
   let apiKey: string;
+  let client: ApiClient;
+  let apiContext: APIRequestContext;
 
-  test.beforeAll(() => {
+  test.beforeAll(async () => {
     ({ authToken, apiKey } = readAuthData());
+    apiContext = await apiRequest.newContext();
+    client = new ApiClient(apiContext);
+    client.setAuth(authToken, apiKey);
   });
 
-  test('should sign in with a valid Cognito token', async ({ request }) => {
-    const res = await request.post(`${API_BASE}/api/v1/users/signin-with-token`, {
-      headers: makeHeaders(authToken, apiKey),
-      data: {},
-    });
+  test.afterAll(async () => {
+    await apiContext.dispose();
+  });
+
+  test('should sign in with a valid Cognito token', async () => {
+    const res = await client.signinWithToken();
 
     expect(res.status()).toBeLessThan(300);
     const body = await res.json();
@@ -76,28 +55,28 @@ test.describe('Authentication API', () => {
   });
 
   test.describe('Negative cases', () => {
-    test('should reject sign-in with no auth headers (401/403)', async ({ request }) => {
-      const res = await request.post(`${API_BASE}/api/v1/users/signin-with-token`, {
-        headers: { 'Content-Type': 'application/json' },
-        data: {},
-      });
+    test('should reject sign-in with no auth headers (401/403)', async () => {
+      const res = await apiContext.post(
+        `${testConfig.apiBaseUrl}/api/v1/users/signin-with-token`,
+        { headers: { 'Content-Type': 'application/json' }, data: {} },
+      );
 
       expect([401, 403]).toContain(res.status());
     });
 
-    test('should reject sign-in with a malformed JWT (401/403)', async ({ request }) => {
-      const res = await request.post(`${API_BASE}/api/v1/users/signin-with-token`, {
-        headers: makeHeaders('eyJhbGciOiJSUzI1NiJ9.invalid.payload', apiKey),
-        data: {},
-      });
+    test('should reject sign-in with a malformed JWT (401/403)', async () => {
+      const badClient = new ApiClient(apiContext);
+      badClient.setAuth('eyJhbGciOiJSUzI1NiJ9.invalid.payload', apiKey);
+      const res = await badClient.signinWithToken();
 
       expect([401, 403]).toContain(res.status());
     });
 
-    test('should return 403/404 for a non-existent endpoint', async ({ request }) => {
-      const res = await request.get(`${API_BASE}/api/v1/this-endpoint-does-not-exist`, {
-        headers: makeHeaders(authToken, apiKey),
-      });
+    test('should return 403/404 for a non-existent endpoint', async () => {
+      const res = await apiContext.get(
+        `${testConfig.apiBaseUrl}/api/v1/this-endpoint-does-not-exist`,
+        { headers: { Authorization: authToken, apikey: apiKey } },
+      );
 
       expect([403, 404]).toContain(res.status());
     });

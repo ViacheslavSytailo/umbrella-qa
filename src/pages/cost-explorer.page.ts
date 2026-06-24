@@ -20,8 +20,6 @@ export class CostExplorerPage {
   // ── Toolbar controls ──────────────────────────────────
   // Group By trigger button (contains the current selection label)
   readonly groupByTrigger: Locator;
-  // Period dropdown trigger (contains "Daily", "Monthly", etc.)
-  readonly periodTrigger: Locator;
   readonly applyButton: Locator;
 
   // ── Cost display ──────────────────────────────────────
@@ -42,11 +40,6 @@ export class CostExplorerPage {
     // Group By — uses a custom div with automation-id, not a button
     this.groupByTrigger = page.locator('[automation-id="primaryGroupBy"]');
 
-    // Period dropdown — the trigger shows the current period value
-    this.periodTrigger = page
-      .locator('button[class*="triggerLabel"], button:has-text("Daily"), button:has-text("Monthly")')
-      .first();
-
     // Apply button
     this.applyButton = page.getByRole('button', { name: 'Apply' });
 
@@ -64,8 +57,8 @@ export class CostExplorerPage {
       .filter({ hasText: /Amortized|Unblended/i })
       .first();
 
-    // Chart
-    this.chartContainer = page.locator('.recharts-wrapper, svg').first();
+    // Chart — scope to recharts classes; a bare 'svg' would match any icon
+    this.chartContainer = page.locator('.recharts-wrapper, .recharts-surface').first();
   }
 
   // ── Navigation ────────────────────────────────────────
@@ -99,24 +92,12 @@ export class CostExplorerPage {
 
   // ── Period selection ──────────────────────────────────
 
-  async selectPeriod(period: 'Yearly' | 'Quarterly' | 'Monthly' | 'Weekly' | 'Daily' | 'Hourly') {
-    await this.periodTrigger.click();
-    await this.page.waitForTimeout(300);
-    // Select from the dropdown list
-    await this.page
-      .getByRole('option', { name: period })
-      .or(this.page.locator(`[data-automation-id="period-option-${period}"]`))
-      .or(this.page.locator(`li:has-text("${period}")`))
-      .first()
-      .click();
-    await this.page.waitForLoadState('networkidle');
-  }
-
   // ── Apply ─────────────────────────────────────────────
 
   async clickApply() {
     await this.applyButton.click();
-    await this.page.waitForLoadState('networkidle');
+    // Wait for chart to re-render instead of networkidle (SPA keeps polling)
+    await this.chartContainer.waitFor({ state: 'visible', timeout: 20_000 });
   }
 
   // ── Assertions ────────────────────────────────────────

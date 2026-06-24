@@ -56,8 +56,9 @@ export class DashboardPage {
     const explorerLink = this.page.locator('#innerSideBarItemButton-costAndUsageExplorer');
     await explorerLink.waitFor({ state: 'visible', timeout: 5_000 });
     await explorerLink.click();
-    await this.page.waitForURL(/cost-usage/, { timeout: 15_000 });
-    await this.page.waitForLoadState('networkidle');
+    // Generous timeout: under parallel load the SPA route transition can take
+    // >15s. We do NOT wait for 'networkidle' — this SPA polls and never idles.
+    await this.page.waitForURL(/cost-usage/, { timeout: 30_000 });
   }
 
   // ── Assertions ────────────────────────────────────────

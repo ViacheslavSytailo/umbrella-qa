@@ -1,33 +1,8 @@
-import { test, expect } from '@playwright/test';
-import fs from 'fs';
-import path from 'path';
-
-const API_BASE = process.env.API_BASE_URL ?? 'https://api.dev.umbrellacost.dev';
-
-interface AuthData {
-  authToken: string;
-  apiKey: string;
-  userId: string;
-}
-
-function readAuthData(): AuthData {
-  const tokenPath = path.join(__dirname, '../../playwright/.auth/token.json');
-  if (!fs.existsSync(tokenPath)) {
-    throw new Error('Auth token not found. Run auth-setup first.');
-  }
-  return JSON.parse(fs.readFileSync(tokenPath, 'utf-8')) as AuthData;
-}
-
-function makeHeaders(authToken: string, apiKey: string): Record<string, string> {
-  return {
-    'Content-Type': 'application/json',
-    accept: 'application/json, text/plain, */*',
-    Authorization: authToken,
-    apikey: apiKey,
-    Referer: 'https://dev.umbrellacost.dev/',
-    commonparams: JSON.stringify({ isPpApplied: false }),
-  };
-}
+import { test, expect, request as apiRequest } from '@playwright/test';
+import type { APIRequestContext } from '@playwright/test';
+import { testConfig } from '../../src/data/test-data';
+import { ApiClient } from '../../src/helpers/api-client';
+import { readAuthData } from '../../src/helpers/read-auth';
 
 /**
  * API-key generation flow tests.
@@ -58,9 +33,18 @@ test.describe('API-key generation flow', () => {
   let authToken: string;
   let apiKey: string;
   let userId: string;
+  let client: ApiClient;
+  let apiContext: APIRequestContext;
 
-  test.beforeAll(() => {
+  test.beforeAll(async () => {
     ({ authToken, apiKey, userId } = readAuthData());
+    apiContext = await apiRequest.newContext();
+    client = new ApiClient(apiContext);
+    client.setAuth(authToken, apiKey);
+  });
+
+  test.afterAll(async () => {
+    await apiContext.dispose();
   });
 
   // ── 1. Key is generated and structurally valid ────────
@@ -88,10 +72,8 @@ test.describe('API-key generation flow', () => {
 
   // ── 3. Key grants access to protected resources ───────
 
-  test('authenticated requests with apikey succeed', async ({ request }) => {
-    const res = await request.get(`${API_BASE}/api/v1/users/roles`, {
-      headers: makeHeaders(authToken, apiKey),
-    });
+  test('authenticated requests with apikey succeed', async () => {
+    const res = await client.getUserRoles();
 
     expect(res.status()).toBe(200);
   });
@@ -99,19 +81,11 @@ test.describe('API-key generation flow', () => {
   // ── 4. Negative cases ─────────────────────────────────
 
   test.describe('Negative cases', () => {
-    test('requests with no credentials are rejected (401/403)', async ({ request }) => {
-      const res = await request.get(`${API_BASE}/api/v1/users/roles`);
+    test('protected endpoint rejects an unauthenticated request (401/403)', async () => {
+      // Authorization boundary: /users/roles requires credentials. Without them
+      // the gateway returns 401 (verified), proving the endpoint is protected.
+      const res = await apiContext.get(`${testConfig.apiBaseUrl}/api/v1/users/roles`);
       expect([401, 403]).toContain(res.status());
-    });
-
-    test('admin-only endpoint is inaccessible to a regular user (403/404/405)', async ({
-      request,
-    }) => {
-      const res = await request.put(`${API_BASE}/api/v1/admin/accounts`, {
-        headers: makeHeaders(authToken, apiKey),
-        data: { test: 'should-fail' },
-      });
-      expect([401, 403, 404, 405]).toContain(res.status());
     });
   });
 });

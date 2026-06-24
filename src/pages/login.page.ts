@@ -43,8 +43,10 @@ export class LoginPage {
   // ── Actions ───────────────────────────────────────────
 
   async goto() {
-    await this.page.goto('/login');
-    await this.page.waitForLoadState('networkidle');
+    // The SPA never fires the 'load' event (it keeps a connection open), so we
+    // navigate on 'domcontentloaded' and wait for the email field element instead.
+    await this.page.goto('/login', { waitUntil: 'domcontentloaded' });
+    await this.emailInput.waitFor({ state: 'visible', timeout: 30_000 });
   }
 
   /** Step 1: enter email and click Next */
@@ -70,11 +72,11 @@ export class LoginPage {
   /** Full login + wait for dashboard redirect */
   async loginAndWaitForDashboard(email: string, password: string) {
     await this.login(email, password);
-    // Wait until we navigate away from /login
+    // Wait until we navigate away from /login. We don't wait for 'networkidle' —
+    // the SPA polls continuously, so the caller asserts on a dashboard element instead.
     await this.page.waitForURL((url) => !url.pathname.includes('/login'), {
       timeout: 30_000,
     });
-    await this.page.waitForLoadState('networkidle');
   }
 
   // ── Assertions ────────────────────────────────────────
