@@ -1,0 +1,133 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  BASE_URL: https://dev.umbrellacost.dev
+  API_BASE_URL: https://api.dev.umbrellacost.dev
+
+jobs:
+  # ── Job 1: Auth setup ────────────────────────────────────────────────────
+  # Runs once, saves storageState + token.json as an artifact shared by all
+  # test shards. This avoids a race condition where two shards write to the
+  # same auth file simultaneously.
+  auth-setup:
+    name: Auth Setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run auth setup
+        run: npx playwright test --project=auth-setup
+        env:
+          USER_EMAIL: ${{ secrets.USER_EMAIL }}
+          USER_PASSWORD: ${{ secrets.USER_PASSWORD }}
+
+      - name: Upload auth state
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-state
+          path: playwright/.auth/
+          retention-days: 1
+
+  # ── Job 2: Test shards ───────────────────────────────────────────────────
+  # Runs API + UI suites in parallel across 2 shards.
+  # Depends on auth-setup so the auth artifact is available.
+  test:
+    name: Test (shard ${{ matrix.shard }})
+    needs: auth-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/2', '2/2']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Download auth state
+        uses: actions/download-artifact@v4
+        with:
+          name: auth-state
+          path: playwright/.auth/
+
+      - name: Run tests (shard ${{ matrix.shard }})
+        run: npx playwright test --project=api --project=ui-chromium --shard=${{ matrix.shard }}
+        env:
+          USER_EMAIL: ${{ secrets.USER_EMAIL }}
+          USER_PASSWORD: ${{ secrets.USER_PASSWORD }}
+
+      - name: Upload blob report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: blob-report-${{ strategy.job-index }}
+          path: blob-report/
+          retention-days: 1
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: allure-results-${{ strategy.job-index }}
+          path: allure-results/
+          retention-days: 14
+
+  # ── Job 3: Merge & publish HTML report ──────────────────────────────────
+  # Merges blob reports from all shards into a single HTML report.
+  merge-reports:
+    name: Merge Reports
+    if: ${{ !cancelled() }}
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: blob-report-*
+          merge-multiple: true
+          path: all-blob-reports
+
+      - name: Merge into HTML report
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+
+      - name: Upload merged HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-html-report
+          path: playwright-report/
+          retention-days: 30
