@@ -38,12 +38,18 @@ jobs:
           USER_EMAIL: ${{ secrets.USER_EMAIL }}
           USER_PASSWORD: ${{ secrets.USER_PASSWORD }}
 
+      - name: Verify auth files exist
+        run: ls -la playwright/.auth/ && cat playwright/.auth/token.json | grep -o '"apiKey":"[^"]*"'
+
       - name: Upload auth state
         uses: actions/upload-artifact@v4
         with:
           name: auth-state
-          path: playwright/.auth/
+          path: |
+            playwright/.auth/user.json
+            playwright/.auth/token.json
           retention-days: 1
+          if-no-files-found: error
 
   # ── Job 2: Test shards ───────────────────────────────────────────────────
   # Runs API + UI suites in parallel across 2 shards.
